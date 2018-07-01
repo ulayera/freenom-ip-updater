@@ -1,0 +1,25 @@
+{
+  "name": "freenom-ip-updater",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js $FN_DOMAIN $FN_DOMAIN_ID $FN_USERNAME $FN_PASSWORD $FN_FRECUENCY",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "keywords": [
+    "nano",
+    "pack"
+  ],
+  "author": "ulayera",
+  "license": "CC",
+  "dependencies": {
+    "cheerio": "^1.0.0-rc.2",
+    "request": "^2.87.0",
+    "request-promise": "^4.2.2"
+  }
+}
