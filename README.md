@@ -24,4 +24,4 @@ docker run -d \
 -e FN_FRECUENCY=300000 \
 --restart always \
 ulayera/freenom-ip-updater
-```
+
