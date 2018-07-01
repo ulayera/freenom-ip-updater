@@ -10,7 +10,7 @@ Update your dynamic ip address automatically with this script, you need:
 
 You can run this script with:
 
-^node index.js DOMAIN DOMAIN_ID USERNAME PASSWORD [ FRECUENCY ]^
+`node index.js DOMAIN DOMAIN_ID USERNAME PASSWORD [ FRECUENCY ]`
 
 or either use docker image:
 
