@@ -24,7 +24,7 @@ function parseTableRows(rows) {
     if (row.children["3"].children["0"].children["0"].data === 'A') {
       objectArray.push({
         ip: row.children["7"].children["1"].children["0"].attribs.value,
-        delete: row.children["9"].children["0"].attribs.href
+        delete: row.children["9"].children["1"].attribs.onclick.split('\'')[3]
       });
     }
   }
@@ -123,7 +123,9 @@ async function clientArea() {
   await request(options, function (error, response, body) {
     if (error) throw new Error(error);
     let $ = cheerio.load(body);
-    let rows = $("body > div.wrapper > section.domainContent > div > div > div > form:nth-child(4) > table > tbody > tr");
+    
+  //let rows = $("body > div.wrapper > section.domainContent > div > div > div > form:nth-child(4) > table > tbody > tr");
+    let rows = $("#recordslistform > table > tbody > tr");
     aTypeRows = parseTableRows(rows);
   });
   return aTypeRows;
