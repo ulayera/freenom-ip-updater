@@ -1,16 +1,22 @@
 const request = require("request-promise");
 const cheerio = require("cheerio");
 let jar = request.jar();
+if (process.argv.length < 6) {
+    console.error("Not enough args");
+    console.error("Usage: node index.js mydomain.com 123456789 mail@email.com MyPassword123");
+    process.exit(1);
+}
 
-let domain = process.argv[2];
-let domainId = process.argv[3];
+let domain = (process.argv[2]) ? process.argv[2].split(',') : [];
+let domainId = (process.argv[3]) ? process.argv[3].split(',') : [];
 let username = process.argv[4];
 let password = process.argv[5];
 let frecuency = process.argv[6] || 60000;
 
+let domains = domain.map((e,i)=>{return {domain: domain[i], domainId: domainId[i]}});
+
 console.log({
-  domain : domain,
-  domainId : domainId,
+  domains : domains,
   username : username,
   password : (password) ? '********' : null
 });
@@ -99,7 +105,7 @@ async function login(token) {
   });
 }
 
-async function clientArea() {
+async function clientArea(domain) {
   let aTypeRows;
   let options = {
     method: 'GET',
@@ -107,7 +113,7 @@ async function clientArea() {
     gzip: true,
     simple: false,
     url: 'https://my.freenom.com/clientarea.php',
-    qs: {managedns: domain, domainid: domainId},
+    qs: {managedns: domain.domain, domainid: domain.domainId},
     headers:
       {
         'Accept-Language': 'en',
@@ -131,13 +137,13 @@ async function clientArea() {
   return aTypeRows;
 }
 
-async function createRecord(ttl, ip) {
+async function createRecord(ttl, ip, domain) {
   let options = {
     simple: false,
     jar: jar,
     method: 'POST',
     url: 'https://my.freenom.com/clientarea.php',
-    qs: {managedns: domain, domainid: domainId},
+    qs: {managedns: domain.domain, domainid: domain.domainId},
     headers:
       {
         'Accept-Language': 'en',
@@ -177,19 +183,21 @@ let logic = async () => {
   let ip = await ipify();
   if (!jar._jar.store.idx["my.freenom.com"]["/"].WHMCSUser)
     await login(token);
-  let aTypeRegisters = await clientArea();
-  for (let i = 0; i < aTypeRegisters.length; i++) {
-    let reg = aTypeRegisters[i];
-    if (reg.ip !== ip) {
-      await request({jar: jar, uri: "https://my.freenom.com/" + reg.delete});
-      console.log(`Registro ${reg.ip} borrado`);
-    } else {
-      isAlreadyCreated = true;
-    }
-  }
-  if (!isAlreadyCreated)
-    await createRecord(300, ip);
-  console.log((isAlreadyCreated ? "Registro existente" : "Registro Creado"));
+  domains.forEach(async(domain) => {
+      let aTypeRegisters = await clientArea(domain);
+      for (let i = 0; i < aTypeRegisters.length; i++) {
+          let reg = aTypeRegisters[i];
+          if (reg.ip !== ip) {
+              await request({jar: jar, uri: "https://my.freenom.com/" + reg.delete});
+              console.log(`Registro ${reg.ip} borrado en ${domain.domain}`);
+          } else {
+              isAlreadyCreated = true;
+          }
+      }
+      if (!isAlreadyCreated)
+          await createRecord(300, ip, domain);
+      console.log((isAlreadyCreated ? `Registro existente en ${domain.domain}` : `Registro Creado ${domain.domain}`));
+  });
 };
 
 let cron = (cb) => {
