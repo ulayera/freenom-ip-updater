@@ -2,8 +2,8 @@
 
 Update your dynamic ip address automatically with this script, you need:
 
-- your domain
-- your domain id
+- your domain (can be one or more comma separated)
+- your domain id (can be one or more comma separated)
 - your freenom username
 - your freenom password
 - OPTIONAL: repeat interval in miliseconds
