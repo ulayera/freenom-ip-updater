@@ -12,6 +12,8 @@ You can run this script with:
 
 `node index.js DOMAIN DOMAIN_ID USERNAME PASSWORD [ FRECUENCY ]`
 
+(it supports comma separated list of DOMAIN/DOMAIN_ID  `... mypage.com,otherpage.com 123456789,12356790 ...`)
+
 or either use docker image:
 
 ````
