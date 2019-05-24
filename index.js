@@ -205,6 +205,7 @@ let logic = async () => {
           if (lastIp == ip) {
             console.error("Detected failure, trying to login again");
             lastIp = token = null;
+            jar = request.jar();
           } else {
             await createRecord(300, ip, domain);
           }
