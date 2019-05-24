@@ -23,7 +23,7 @@ console.log({
     password: (password) ? '********' : null
 });
 
-let token;
+let token, lastIp;
 
 function parseTableRows(rows) {
     let objectArray = [];
@@ -201,9 +201,16 @@ let logic = async () => {
                 isAlreadyCreated = true;
             }
         }
-        if (!isAlreadyCreated)
+        if (!isAlreadyCreated) {
+          if (lastIp == ip) {
+            console.error("Detected failure, trying to login again");
+            lastIp = token = null;
+          } else {
             await createRecord(300, ip, domain);
+          }
+        }
         console.log((isAlreadyCreated ? `Existing record on ${domain.domain}` : `Record created on ${domain.domain}`));
+        lastIp = ip;
     });
 };
 
