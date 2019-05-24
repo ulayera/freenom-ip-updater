@@ -177,6 +177,9 @@ async function createRecord(ttl, ip, domain) {
     };
     await request(options, function (error, response, body) {
         if (error) throw new Error(error);
+        console.log("Location: " + response.headers.location);
+        console.log("Status: " + response.statusCode);
+        console.log("Body: " + response.body);
     });
 }
 
@@ -193,14 +196,14 @@ let logic = async () => {
             let reg = aTypeRegisters[i];
             if (reg.ip !== ip) {
                 await request({ jar: jar, uri: "https://my.freenom.com/" + reg.delete });
-                console.log(`Registro ${reg.ip} borrado en ${domain.domain}`);
+                console.log(`Record ${reg.ip} deleted on ${domain.domain}`);
             } else {
                 isAlreadyCreated = true;
             }
         }
         if (!isAlreadyCreated)
             await createRecord(300, ip, domain);
-        console.log((isAlreadyCreated ? `Registro existente en ${domain.domain}` : `Registro Creado ${domain.domain}`));
+        console.log((isAlreadyCreated ? `Existing record on ${domain.domain}` : `Record created on ${domain.domain}`));
     });
 };
 
