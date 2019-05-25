@@ -1,6 +1,6 @@
 const request = require("request-promise");
 const cheerio = require("cheerio");
-let jar = request.jar();
+let jar;
 if (process.argv.length < 6) {
   console.error("Not enough args");
   console.error("Usage: node index.js mydomain.com 123456789 mail@email.com MyPassword123");
@@ -68,6 +68,7 @@ async function ipify() {
 }
 
 async function login(token) {
+  jar = request.jar();
   let options = {
     method: 'POST',
     simple: false,
@@ -94,21 +95,20 @@ async function login(token) {
         rememberme: 'on'
       }
   };
-
-  return await request(options, function (error, response) {
-    if (error) {
-      throw new Error(error);
-    } else if (response.headers.location === '/clientarea.php?incorrect=true') {
-      throw new Error("Login fallido");
-    } else if (response.statusCode === 302 && response.headers.location === '/clientarea.php') {
-      return true;
-    }
-    return false;
+  return new Promise((resolve, reject) => {
+    request(options, function (error, response) {
+      if (error) {
+        reject(error);
+      } else if (response.headers.location === '/clientarea.php?incorrect=true') {
+        reject("Login fallido");
+      } else if (response.statusCode === 302 && response.headers.location.indexOf('clientarea.php') > -1) {
+        resolve(true);
+      }
+    });
   });
 }
 
 async function clientArea(domain) {
-  let aTypeRows;
   let options = {
     method: 'GET',
     jar: jar,
@@ -128,17 +128,18 @@ async function clientArea(domain) {
         Connection: 'keep-alive'
       }
   };
-  await request(options, function (error, response, body) {
-    if (error) throw new Error(error);
-    let $ = cheerio.load(body);
-    //password input means token expired, will relogin at next execution
-    if ($("#password").length > 0)
-      token = null;
-    //let rows = $("body > div.wrapper > section.domainContent > div > div > div > form:nth-child(4) > table > tbody > tr");
-    let rows = $("#recordslistform > table > tbody > tr");
-    aTypeRows = parseTableRows(rows);
+  return new Promise((resolve, reject) => {
+    request(options, function (error, response, body) {
+      if (error) throw new Error(error);
+      let $ = cheerio.load(body);
+      if ($("#recordslistform").length > 0) {
+        let rows = $("#recordslistform > table > tbody > tr");
+        resolve(parseTableRows(rows));
+      } else {
+        reject(null);
+      }
+    });
   });
-  return aTypeRows;
 }
 
 async function createRecord(ttl, ip, domain) {
@@ -176,52 +177,66 @@ async function createRecord(ttl, ip, domain) {
         'addrecord[0][forward_type]': '1'
       }
   };
-  return await request(options, function (error, response, body) {
-    if (error) throw new Error(error);
-    return !!response.body;
+  return new Promise((resolve) => {
+    request(options, function (error, response, body) {
+      if (error) reject(error);
+      if (!body || body.length === 0) {
+        resolve(true);
+      } else {
+        resolve(false);
+      }
+    })
   });
 }
 
 let logic = async () => {
   console.log("============================================================================");
   console.log("[PreTask] Running job...");
-  if (!token)
+  if (!token) {
     token = await home();
-  let ip = await ipify();
-  console.log(`[Validations] Ip actual ${ip}`);
-  if (!jar._jar.store.idx["my.freenom.com"]["/"].WHMCSUser) {
-    let result = await login(token);
-    if (result) {
-      console.log("[PreTask] Login exitoso.");
-    }
+    console.log(`[PreTask] Obtained token ${token}`);
   }
-  domains.forEach(async (domain) => {
+  let ip = await ipify();
+  console.log(`[Validations] Current IP address ${ip}`);
+  for (let j = 0; j < domains.length; j++) {
+    let currentDomain = domains[j];
     let wasAlreadyCreated = false;
-    let aTypeRegisters = await clientArea(domain);
+    let aTypeRegisters;
+    try {
+      aTypeRegisters = await clientArea(currentDomain);
+    } catch (e) {
+      console.log(`[PreTask] Logging in.`);
+      let result = await login(token);
+      if (result && !(result instanceof Error)) {
+        aTypeRegisters = await clientArea(currentDomain);
+        console.log(`[PreTask] Login success.`);
+      }
+    }
     for (let i = 0; i < aTypeRegisters.length; i++) {
       let reg = aTypeRegisters[i];
       if (reg.ip !== ip) {
         await request({ jar: jar, uri: "https://my.freenom.com/" + reg.delete });
-        console.log(`[Validations] Record ${reg.ip} deleted on ${domain.domain}`);
+        console.log(`[Validations] Record ${reg.ip} deleted on ${currentDomain.domain}`);
       } else {
-        console.log(`[Validations] Record ${reg.ip} already exists on ${domain.domain}`);
+        console.warn(`[Validations] Record ${reg.ip} already exists on ${currentDomain.domain}`);
         wasAlreadyCreated = true;
       }
     }
     if (!wasAlreadyCreated) {
-      let result = await createRecord(300, ip, domain);
-      if (!result) {
-        wasAlreadyCreated = false;
-        console.error("[Warning] Detected failure, trying to login again");
-        jar = request.jar();
-        token = null;
-        logic();
-      }
+      createRecord(300, ip, currentDomain)
+        .then((result) => {
+          if (result) {
+            console.log(`[PostTasks] Non existing record on ${currentDomain.domain}, record was created.`);
+          } else {
+            console.error(`[PostTasks] Non existing record on ${currentDomain.domain}, record WAS NOT created.`);
+          }
+        })
+        .catch(console.error);
+    } else {
+      console.log(`[PostTasks] Existing record on ${currentDomain.domain}, nothing was done.`);
     }
-    console.log((wasAlreadyCreated ?
-      `[PostTasks] Existing record on ${domain.domain}, nothing was done.` :
-      `[PostTasks] Non existing record on ${domain.domain}, record was created.`));
-  });
+    console.log("============================================================================");
+  }
 };
 
 let cron = (cb) => {
