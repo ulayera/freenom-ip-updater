@@ -1,6 +1,8 @@
 const request = require("request-promise");
 const cheerio = require("cheerio");
 let jar;
+let SECTION_SEPARATOR = `===================================================================================`;
+
 if (process.argv.length < 6) {
   console.error("Not enough args");
   console.error("Usage: node index.js mydomain.com 123456789 mail@email.com MyPassword123");
@@ -23,8 +25,6 @@ console.log({
   password: (password) ? '********' : null
 });
 
-let token;
-
 function parseTableRows(rows) {
   let objectArray = [];
   for (let k = 0; k < rows.length; k++) {
@@ -40,7 +40,6 @@ function parseTableRows(rows) {
 }
 
 async function home() {
-  let token;
   let optionsHome = {
     method: 'GET',
     simple: false,
@@ -50,21 +49,24 @@ async function home() {
       { 'Cache-Control': 'no-cache' }
   };
 
-  await request(optionsHome, function (error, response, body) {
-    if (error) throw new Error(error);
-    let $ = cheerio.load(body);
-    let result = $("body > div.wrapper > section.login > div > div > div.col-md-4.max-width.form > form.form-stacked > input[type=\"hidden\"]")[0];
-    token = result.attribs.value;
+  return new Promise((resolve, reject) => {
+    request(optionsHome, function (error, response, body) {
+      if (error) reject(error);
+      let $ = cheerio.load(body);
+      let result = $("body > div.wrapper > section.login > div > div > div.col-md-4.max-width.form > form.form-stacked > input[type=\"hidden\"]")[0];
+      token = result.attribs.value;
+      resolve(token);
+    });
   });
-  return token;
 }
 
 async function ipify() {
-  let ip;
-  await request({ uri: 'https://api.ipify.org?format=json', json: true }, (error, response, body) => {
-    ip = body.ip;
+  return new Promise((resolve, reject) => {
+    request({ uri: 'https://api.ipify.org?format=json', json: true }, (error, response, body) => {
+      if (error) reject(error);
+      resolve(body.ip);
+    });
   });
-  return ip;
 }
 
 async function login(token) {
@@ -102,7 +104,7 @@ async function login(token) {
       } else if (response.headers.location === '/clientarea.php?incorrect=true') {
         reject("Login fallido");
       } else if (response.statusCode === 302 && response.headers.location.indexOf('clientarea.php') > -1) {
-        resolve(true);
+        resolve();
       }
     });
   });
@@ -130,13 +132,13 @@ async function clientArea(domain) {
   };
   return new Promise((resolve, reject) => {
     request(options, function (error, response, body) {
-      if (error) throw new Error(error);
+      if (error) reject(error);
       let $ = cheerio.load(body);
       if ($("#recordslistform").length > 0) {
         let rows = $("#recordslistform > table > tbody > tr");
         resolve(parseTableRows(rows));
       } else {
-        reject(null);
+        reject();
       }
     });
   });
@@ -189,54 +191,83 @@ async function createRecord(ttl, ip, domain) {
   });
 }
 
-let logic = async () => {
-  console.log("============================================================================");
-  console.log("[PreTask] Running job...");
-  if (!token) {
-    token = await home();
-    console.log(`[PreTask] Obtained token ${token}`);
-  }
-  let ip = await ipify();
-  console.log(`[Validations] Current IP address ${ip}`);
-  for (let j = 0; j < domains.length; j++) {
-    let currentDomain = domains[j];
-    let wasAlreadyCreated = false;
-    let aTypeRegisters;
-    try {
-      aTypeRegisters = await clientArea(currentDomain);
-    } catch (e) {
-      console.log(`[PreTask] Logging in.`);
-      let result = await login(token);
-      if (result && !(result instanceof Error)) {
-        aTypeRegisters = await clientArea(currentDomain);
-        console.log(`[PreTask] Login success.`);
-      }
-    }
-    for (let i = 0; i < aTypeRegisters.length; i++) {
-      let reg = aTypeRegisters[i];
-      if (reg.ip !== ip) {
-        await request({ jar: jar, uri: "https://my.freenom.com/" + reg.delete });
+function loginProcess() {
+  return new Promise(resolve => {
+    console.log(`[OnDemandTask] Logging in.`);
+    home().then(token => {
+      login(token).then(() => {
+        console.log(`[OnDemandTask] Login success.`);
+        resolve();
+      }).catch(console.error);
+    });
+  });
+}
+
+async function getATypeRegisters(currentDomain) {
+  return new Promise(resolve => {
+    clientArea(currentDomain).then(aTypeRegisters => {
+      resolve(aTypeRegisters);
+    }).catch(() => {
+      loginProcess().then(() => {
+        clientArea(currentDomain).then(aTypeRegisters => {
+          resolve(aTypeRegisters);
+        });
+      });
+    });
+  });
+}
+
+function deleteATypeRegister(reg, currentDomain) {
+  return new Promise(resolve => {
+    request({ jar: jar, uri: "https://my.freenom.com/" + reg.delete })
+      .then(() => {
         console.log(`[Validations] Record ${reg.ip} deleted on ${currentDomain.domain}`);
-      } else {
-        console.warn(`[Validations] Record ${reg.ip} already exists on ${currentDomain.domain}`);
-        wasAlreadyCreated = true;
-      }
-    }
-    if (!wasAlreadyCreated) {
-      createRecord(300, ip, currentDomain)
-        .then((result) => {
-          if (result) {
-            console.log(`[PostTasks] Non existing record on ${currentDomain.domain}, record was created.`);
-          } else {
-            console.error(`[PostTasks] Non existing record on ${currentDomain.domain}, record WAS NOT created.`);
-          }
-        })
-        .catch(console.error);
-    } else {
-      console.log(`[PostTasks] Existing record on ${currentDomain.domain}, nothing was done.`);
-    }
-    console.log("============================================================================");
-  }
+        resolve();
+      });
+  });
+}
+
+function iterateDomains(ip) {
+  return new Promise(resolve => {
+    domains.forEach(currentDomain => {
+      getATypeRegisters(currentDomain)
+        .then(aTypeRegisters => {
+          Promise.all(aTypeRegisters.filter(reg => reg.ip !== ip)
+            .map(reg => deleteATypeRegister(reg, currentDomain)))
+            .then(() => {
+              let existing = aTypeRegisters.find(reg => reg.ip === ip);
+              if (existing) {
+                console.info(`[Validations] Record ${existing.ip} already exists on ${currentDomain.domain}`);
+                resolve();
+              } else {
+                createRecord(300, ip, currentDomain)
+                  .then((result) => {
+                    if (result) {
+                      console.log(`[PostTasks] Non existing record on ${currentDomain.domain}, record was created.`);
+                    } else {
+                      console.error(`[PostTasks] Non existing record on ${currentDomain.domain}, record WAS NOT created.`);
+                    }
+                    resolve();
+                  })
+                  .catch(console.error);
+              }
+            });
+        });
+    });
+  });
+}
+
+let logic = async () => {
+
+  console.log(SECTION_SEPARATOR);
+  console.log(`[InfoTask] Running job at ${new Date()}.`);
+  ipify().then(ip => {
+    console.log(`[Validations] Current IP address ${ip}`);
+    iterateDomains(ip).then(() => {
+      console.log(SECTION_SEPARATOR);
+    });
+  });
+
 };
 
 let cron = (cb) => {
